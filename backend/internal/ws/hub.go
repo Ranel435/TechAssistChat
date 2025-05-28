@@ -1,0 +1,87 @@
+package ws
+
+import (
+	"log"
+	"sync"
+)
+
+type Hub struct {
+	clients    map[*Client]bool
+	register   chan *Client
+	unregister chan *Client
+	broadcast  chan Message
+	mu         sync.Mutex
+}
+
+var hubInstance *Hub
+var once sync.Once
+
+func GetHub() *Hub {
+	once.Do(func() {
+		hubInstance = &Hub{
+			clients:    make(map[*Client]bool),
+			register:   make(chan *Client),
+			unregister: make(chan *Client),
+			broadcast:  make(chan Message, 256),
+		}
+		log.Println("Hub инициализирован")
+	})
+	return hubInstance
+}
+
+func (h *Hub) Run() {
+	log.Println("Hub запущен и ожидает соединения...")
+
+	for {
+		select {
+		case client := <-h.register:
+			h.mu.Lock()
+			h.clients[client] = true
+			h.mu.Unlock()
+			log.Printf("Клиент %s подключен. Всего клиентов: %d",
+				client.UserID, len(h.clients))
+
+		case client := <-h.unregister:
+			h.mu.Lock()
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.Send)
+				log.Printf("Клиент %s отключен. Осталось клиентов: %d",
+					client.UserID, len(h.clients))
+			}
+			h.mu.Unlock()
+
+		case msg := <-h.broadcast:
+			h.mu.Lock()
+			delivered := false
+			for client := range h.clients {
+				if client.UserID == msg.To {
+					select {
+					case client.Send <- msg:
+						delivered = true
+						log.Printf("Сообщение доставлено пользователю %s", msg.To)
+					default:
+						delete(h.clients, client)
+						close(client.Send)
+						log.Printf("Отключен неотвечающий клиент: %s", client.UserID)
+					}
+				}
+			}
+			if !delivered {
+				log.Printf("Пользователь %s не найден для доставки сообщения", msg.To)
+			}
+			h.mu.Unlock()
+		}
+	}
+}
+
+func (h *Hub) GetConnectedUsers() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	users := make([]string, 0, len(h.clients))
+	for client := range h.clients {
+		users = append(users, client.UserID)
+	}
+	return users
+}

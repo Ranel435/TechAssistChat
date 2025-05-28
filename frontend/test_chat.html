@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test WebSocket Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; }
+        .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
+        input { margin: 5px; padding: 5px; }
+        button { margin: 5px; padding: 5px 10px; }
+        #messages { height: 300px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; }
+        .message { margin: 2px 0; }
+        .status { color: #666; font-style: italic; }
+        .sent { color: #0066cc; }
+        .received { color: #009900; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Chat Test</h1>
+        
+        <div class="section">
+            <h3>Подключение</h3>
+            <label>Ваше имя: <input type="text" id="username" value="user1" placeholder="Введите имя пользователя"></label>
+            <button onclick="connect()">Подключиться</button>
+            <button onclick="disconnect()">Отключиться</button>
+            <span id="status">Не подключен</span>
+        </div>
+        
+        <div class="section">
+            <h3>Отправка сообщения</h3>
+            <label>Кому: <input type="text" id="toUser" value="user2" placeholder="Имя получателя"></label><br>
+            <label>Сообщение: <input type="text" id="messageInput" placeholder="Введите сообщение" style="width: 300px;"></label>
+            <button onclick="sendMessage()">Отправить</button>
+        </div>
+        
+        <div class="section">
+            <h3>Сообщения:</h3>
+            <div id="messages"></div>
+            <button onclick="clearMessages()">Очистить</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        
+        function connect() {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                alert('Введите имя пользователя');
+                return;
+            }
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            ws = new WebSocket(`ws://localhost:8080/ws?user=${username}`);
+            
+            ws.onopen = function(event) {
+                addMessage(`🟢 Подключен как ${username}`, 'status');
+                document.getElementById('status').textContent = `Подключен как ${username}`;
+                document.getElementById('status').style.color = 'green';
+            };
+            
+            ws.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                addMessage(`📨 От ${msg.from}: ${msg.message}`, 'received');
+            };
+            
+            ws.onclose = function(event) {
+                addMessage('🔴 Отключен', 'status');
+                document.getElementById('status').textContent = 'Не подключен';
+                document.getElementById('status').style.color = 'red';
+                ws = null;
+            };
+            
+            ws.onerror = function(error) {
+                addMessage('❌ Ошибка подключения: ' + error, 'status');
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function sendMessage() {
+            if (!ws) {
+                addMessage('❌ Не подключен к серверу!', 'status');
+                return;
+            }
+            
+            const to = document.getElementById('toUser').value;
+            const message = document.getElementById('messageInput').value;
+            
+            if (!to || !message) {
+                alert('Заполните получателя и сообщение');
+                return;
+            }
+            
+            const msg = {
+                to: to,
+                message: message
+            };
+            
+            try {
+                ws.send(JSON.stringify(msg));
+                addMessage(`📤 Для ${to}: ${message}`, 'sent');
+                document.getElementById('messageInput').value = '';
+            } catch (error) {
+                addMessage('❌ Ошибка отправки: ' + error, 'status');
+            }
+        }
+        
+        function addMessage(text, className = '') {
+            const messages = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className = `message ${className}`;
+            div.textContent = new Date().toLocaleTimeString() + ' - ' + text;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+        
+        // Отправка сообщения по Enter
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Подключение по Enter в поле имени
+        document.getElementById('username').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                connect();
+            }
+        });
+    </script>
+</body>
+</html>
