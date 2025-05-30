@@ -1,16 +1,18 @@
 package ws
 
 import (
+	"backend/internal/repository"
 	"log"
 	"sync"
 )
 
 type Hub struct {
-	clients    map[*Client]bool
-	register   chan *Client
-	unregister chan *Client
-	broadcast  chan Message
-	mu         sync.Mutex
+	clients     map[*Client]bool
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan Message
+	mu          sync.Mutex
+	messageRepo repository.MessageRepository
 }
 
 var hubInstance *Hub
@@ -19,12 +21,13 @@ var once sync.Once
 func GetHub() *Hub {
 	once.Do(func() {
 		hubInstance = &Hub{
-			clients:    make(map[*Client]bool),
-			register:   make(chan *Client),
-			unregister: make(chan *Client),
-			broadcast:  make(chan Message, 256),
+			clients:     make(map[*Client]bool),
+			register:    make(chan *Client),
+			unregister:  make(chan *Client),
+			broadcast:   make(chan Message, 256),
+			messageRepo: repository.NewMessageRepository(),
 		}
-		log.Println("Hub инициализирован")
+		log.Println("Hub инициализирован с БД поддержкой")
 	})
 	return hubInstance
 }
@@ -36,6 +39,16 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.mu.Lock()
+
+			// Отключаем предыдущие соединения этого пользователя
+			for existingClient := range h.clients {
+				if existingClient.UserID == client.UserID {
+					delete(h.clients, existingClient)
+					close(existingClient.Send)
+					log.Printf("Отключено предыдущее соединение пользователя %s", client.UserID)
+				}
+			}
+
 			h.clients[client] = true
 			h.mu.Unlock()
 			log.Printf("Клиент %s подключен. Всего клиентов: %d",
@@ -52,6 +65,11 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 		case msg := <-h.broadcast:
+			dbMessage := msg.ToDBMessage()
+			if err := h.messageRepo.Save(dbMessage); err != nil {
+				log.Printf("Ошибка сохранения сообщения в БД: %v", err)
+			}
+
 			h.mu.Lock()
 			delivered := false
 			for client := range h.clients {
@@ -60,6 +78,7 @@ func (h *Hub) Run() {
 					case client.Send <- msg:
 						delivered = true
 						log.Printf("Сообщение доставлено пользователю %s", msg.To)
+						break
 					default:
 						delete(h.clients, client)
 						close(client.Send)
@@ -68,7 +87,7 @@ func (h *Hub) Run() {
 				}
 			}
 			if !delivered {
-				log.Printf("Пользователь %s не найден для доставки сообщения", msg.To)
+				log.Printf("Пользователь %s оффлайн, сообщение сохранено в БД", msg.To)
 			}
 			h.mu.Unlock()
 		}
@@ -84,4 +103,18 @@ func (h *Hub) GetConnectedUsers() []string {
 		users = append(users, client.UserID)
 	}
 	return users
+}
+
+func (h *Hub) GetChatHistory(user1, user2 string, limit int) ([]Message, error) {
+	dbMessages, err := h.messageRepo.GetChatHistory(user1, user2, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]Message, len(dbMessages))
+	for i, dbMsg := range dbMessages {
+		messages[i] = *FromDBMessage(&dbMsg)
+	}
+
+	return messages, nil
 }
