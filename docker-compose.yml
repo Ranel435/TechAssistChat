@@ -50,14 +50,14 @@ services:
       timeout: 10s
       retries: 3
 
-  # Frontend (Nginx)
-  frontend:
+  # React Frontend
+  react-frontend:
     build:
-      context: ./frontend
+      context: ./react-frontend
       dockerfile: Dockerfile
-    container_name: techassistchat_frontend
+    container_name: techassistchat_react_frontend
     ports:
-      - "3000:80"
+      - "3100:80"
     depends_on:
       - backend
     networks:
@@ -68,6 +68,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Old Frontend (optional, for comparison)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: techassistchat_frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    networks:
+      - techassistchat_network
+    restart: unless-stopped
+    profiles:
+      - old-frontend
 
 volumes:
   postgres_data:

@@ -12,6 +12,10 @@ up:
 dev:
 	docker-compose up
 
+# Запуск со старым фронтендом
+up-old:
+	docker-compose --profile old-frontend up -d
+
 # Остановка всех сервисов
 down:
 	docker-compose down
@@ -31,6 +35,9 @@ logs:
 # Логи конкретного сервиса
 logs-backend:
 	docker-compose logs -f backend
+
+logs-react:
+	docker-compose logs -f react-frontend
 
 logs-frontend:
 	docker-compose logs -f frontend
@@ -62,6 +69,10 @@ rebuild: clean build up
 restart-backend:
 	docker-compose restart backend
 
-# Быстрый перезапуск только frontend
-restart-frontend:
-	docker-compose restart frontend 
+# Быстрый перезапуск только React frontend
+restart-react:
+	docker-compose restart react-frontend
+
+# Разработка React (локальный запуск)
+dev-react:
+	cd react-frontend && npm start 
