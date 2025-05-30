@@ -118,3 +118,7 @@ func (h *Hub) GetChatHistory(user1, user2 string, limit int) ([]Message, error) 
 
 	return messages, nil
 }
+
+func (h *Hub) GetBroadcastChannel() chan<- Message {
+	return h.broadcast
+}

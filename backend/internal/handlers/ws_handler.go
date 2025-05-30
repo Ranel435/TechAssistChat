@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"backend/internal/ws"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +17,13 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub) {
 
 	conn, err := ws.UpgradeConnection(c.Writer, c.Request)
 	if err != nil {
+		log.Printf("Ошибка обновления соединения: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось обновить соединение"})
 		return
 	}
 
 	client := ws.NewClient(conn, userID, hub)
 
+	log.Printf("Регистрация пользователя: %s", userID)
 	hub.RegisterClient(client)
 }
