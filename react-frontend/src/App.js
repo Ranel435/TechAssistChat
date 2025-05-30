@@ -514,10 +514,10 @@ function App() {
                   <h3>Чаты ({chats.length})</h3>
                   <button 
                     onClick={() => setShowNewChatForm(true)}
-                    className="btn btn-small btn-primary"
+                    className="new-chat-btn"
                     title="Создать новый чат"
                   >
-                    <PlusIcon />
+                    +
                   </button>
                 </div>
 
