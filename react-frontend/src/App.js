@@ -5,6 +5,118 @@ const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:
 const WS_URL = process.env.NODE_ENV === 'production' ? 
   `ws://${window.location.host}/ws` : 'ws://localhost:8080/ws';
 
+// Утилиты для работы с токенами
+const TokenManager = {
+  getToken: () => localStorage.getItem('jwt_token'),
+  setToken: (token) => localStorage.setItem('jwt_token', token),
+  removeToken: () => localStorage.removeItem('jwt_token'),
+  getUserData: () => {
+    const userData = localStorage.getItem('user_data');
+    return userData ? JSON.parse(userData) : null;
+  },
+  setUserData: (data) => localStorage.setItem('user_data', JSON.stringify(data)),
+  removeUserData: () => localStorage.removeItem('user_data'),
+  isAuthenticated: () => !!TokenManager.getToken()
+};
+
+// Компонент авторизации
+const AuthForm = ({ onLogin }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const endpoint = isLogin ? '/login' : '/register';
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        TokenManager.setToken(data.token);
+        TokenManager.setUserData({
+          user_id: data.user_id,
+          username: data.username
+        });
+        onLogin(data);
+      } else {
+        setError(data.error || 'Ошибка аутентификации');
+      }
+    } catch (error) {
+      setError('Ошибка соединения с сервером');
+      console.error('Auth error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-container">
+      <div className="auth-form">
+        <h2>{isLogin ? 'Вход' : 'Регистрация'}</h2>
+        
+        {error && <div className="error-message">{error}</div>}
+        
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <input
+              type="text"
+              placeholder="Имя пользователя"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              minLength={3}
+              disabled={loading}
+            />
+          </div>
+          
+          <div className="form-group">
+            <input
+              type="password"
+              placeholder="Пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              disabled={loading}
+            />
+          </div>
+          
+          <button type="submit" disabled={loading}>
+            {loading ? 'Загрузка...' : (isLogin ? 'Войти' : 'Зарегистрироваться')}
+          </button>
+        </form>
+        
+        <p>
+          {isLogin ? 'Нет аккаунта? ' : 'Уже есть аккаунт? '}
+          <button 
+            type="button" 
+            className="link-button"
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError('');
+            }}
+          >
+            {isLogin ? 'Зарегистрироваться' : 'Войти'}
+          </button>
+        </p>
+      </div>
+    </div>
+  );
+};
+
 // Simple icons as SVG components
 const MessageIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -53,8 +165,10 @@ const WifiOffIcon = () => (
   </svg>
 );
 
+// Главный компонент приложения
 function App() {
-  const [username, setUsername] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(TokenManager.isAuthenticated());
+  const [userData, setUserData] = useState(TokenManager.getUserData());
   const [currentChat, setCurrentChat] = useState(null);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
@@ -64,10 +178,33 @@ function App() {
   const [showNewChatForm, setShowNewChatForm] = useState(false);
   const [newChatUser, setNewChatUser] = useState('');
   const [newChatMessage, setNewChatMessage] = useState('');
-  const [onlineUsers, setOnlineUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
-  const messageInputRef = useRef(null);
+
+  // API helper с авторизацией
+  const apiCall = async (url, options = {}) => {
+    const token = TokenManager.getToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${url}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error('Unauthorized');
+    }
+
+    return response;
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -78,105 +215,65 @@ function App() {
   }, [messages]);
 
   useEffect(() => {
-    if (isConnected && username) {
-      loadChats();
-      loadOnlineUsers();
+    if (isAuthenticated && userData) {
+      connect();
     }
-  }, [isConnected, username]);
+  }, [isAuthenticated, userData]);
 
-  // Безопасная функция форматирования времени
-  const formatTime = (timestamp) => {
-    try {
-      if (!timestamp) return '';
-      
-      // Обрабатываем разные форматы времени
-      let date;
-      if (typeof timestamp === 'string') {
-        // Если строка пустая или только пробелы
-        if (!timestamp.trim()) return '';
-        date = new Date(timestamp);
-      } else if (timestamp instanceof Date) {
-        date = timestamp;
-      } else {
-        return '';
-      }
-      
-      // Проверяем валидность даты
-      if (isNaN(date.getTime())) {
-        console.warn('Невалидная дата:', timestamp);
-        return '';
-      }
-      
-      return new Intl.DateTimeFormat('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit'
-      }).format(date);
-    } catch (error) {
-      console.error('Ошибка форматирования времени:', error, 'timestamp:', timestamp);
-      return '';
-    }
+  const handleLogin = (authData) => {
+    setIsAuthenticated(true);
+    setUserData(authData);
   };
 
-  // Безопасная функция форматирования даты
-  const formatDate = (timestamp) => {
-    try {
-      if (!timestamp) return '';
-      
-      let date;
-      if (typeof timestamp === 'string') {
-        if (!timestamp.trim()) return '';
-        date = new Date(timestamp);
-      } else if (timestamp instanceof Date) {
-        date = timestamp;
-      } else {
-        return '';
-      }
-      
-      if (isNaN(date.getTime())) {
-        console.warn('Невалидная дата для formatDate:', timestamp);
-        return '';
-      }
-      
-      const now = new Date();
-      const isToday = now.toDateString() === date.toDateString();
-      
-      if (isToday) {
-        return formatTime(date);
-      } else {
-        return new Intl.DateTimeFormat('ru-RU', {
-          day: '2-digit',
-          month: '2-digit'
-        }).format(date);
-      }
-    } catch (error) {
-      console.error('Ошибка форматирования даты:', error, 'timestamp:', timestamp);
-      return '';
+  const handleLogout = () => {
+    if (ws) {
+      ws.close();
     }
+    TokenManager.removeToken();
+    TokenManager.removeUserData();
+    setIsAuthenticated(false);
+    setUserData(null);
+    setCurrentChat(null);
+    setMessages([]);
+    setChats([]);
+    setIsConnected(false);
   };
 
   const connect = () => {
-    if (!username.trim()) {
-      alert('Введите ваше имя');
+    if (!userData || !TokenManager.getToken()) {
       return;
     }
 
-    const websocket = new WebSocket(`${WS_URL}?user=${encodeURIComponent(username)}`);
+    const token = TokenManager.getToken();
+    const websocket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
     
     websocket.onopen = () => {
       setIsConnected(true);
       setWs(websocket);
-      console.log(`✅ Подключен как ${username}`);
+      console.log(`✅ Подключен как ${userData.username}`);
+      loadChats();
     };
 
     websocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         console.log('📨 Получено сообщение:', data);
-        addMessage(data.from, data.to, data.message, 'received');
         
-        if (data.to === username) {
-          setTimeout(() => loadChats(), 500);
-        }
+        // Обработка сообщения с новыми полями
+        const newMessage = {
+          from_user_id: data.from_user_id,
+          to_user_id: data.to_user_id,
+          from_username: data.from_username,
+          to_username: data.to_username,
+          message: data.message,
+          created_at: new Date().toISOString(),
+          type: 'received'
+        };
+
+        setMessages(prev => [...prev, newMessage]);
+        
+        // Обновляем список чатов
+        setTimeout(() => loadChats(), 500);
       } catch (error) {
         console.error('❌ Ошибка парсинга сообщения:', error);
       }
@@ -193,245 +290,155 @@ function App() {
     };
   };
 
-  const disconnect = () => {
-    if (ws) {
-      ws.close();
-    }
-    setCurrentChat(null);
-    setMessages([]);
-    setChats([]);
-  };
-
   const loadChats = async () => {
-    if (!username) return;
-
     try {
-      console.log(`📋 Загружаем чаты для ${username}`);
-      const url = `${API_BASE}/api/chats/${username}`;
-      console.log(`🔗 URL: ${url}`);
-      
-      const response = await fetch(url);
-      console.log(`📡 Статус ответа: ${response.status}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
+      const response = await apiCall('/api/auth/chats');
       const data = await response.json();
-      console.log('📋 Полученные чаты:', data);
       
-      if (data.chats && Array.isArray(data.chats)) {
-        setChats(data.chats);
-      } else {
-        console.log('📋 Чаты не найдены или неверный формат');
-        setChats([]);
-      }
-    } catch (error) {
-      console.error('❌ Ошибка загрузки чатов:', error);
-      setChats([]);
-    }
-  };
-
-  const loadOnlineUsers = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/users/online`);
       if (response.ok) {
-        const data = await response.json();
-        if (data.users) {
-          setOnlineUsers(data.users.filter(user => user !== username));
-        }
+        setChats(data.chats || []);
       }
     } catch (error) {
-      console.error('❌ Ошибка загрузки онлайн пользователей:', error);
+      console.error('Ошибка загрузки чатов:', error);
     }
   };
 
   const selectChat = async (otherUser) => {
-    console.log(`🔄 Выбираем чат с ${otherUser}`);
-    
+    if (!otherUser || !otherUser.id) {
+      console.error('Неверные данные пользователя:', otherUser);
+      return;
+    }
+
     setCurrentChat(otherUser);
     setLoading(true);
-    
-    // Показываем загрузку
-    setMessages([{
-      id: 'loading',
-      message: `💬 Загружаем чат с ${otherUser}...`,
-      timestamp: new Date(),
-      type: 'system'
-    }]);
 
     try {
-      const url = `${API_BASE}/api/chat/${username}/${otherUser}`;
-      console.log(`📡 Запрос истории: ${url}`);
-      
-      const response = await fetch(url);
-      console.log(`📡 Статус ответа: ${response.status}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
+      const response = await apiCall(`/api/auth/history?userB_id=${otherUser.id}`);
       const data = await response.json();
-      console.log('📨 Полученные данные чата:', data);
       
-      // Создаем массив сообщений
-      const newMessages = [{
-        id: 'header',
-        message: `💬 Чат с ${otherUser}`,
-        timestamp: new Date(),
-        type: 'system'
-      }];
-      
-      if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-        console.log(`📝 Найдено ${data.messages.length} сообщений`);
-        
-        data.messages.forEach((msg, index) => {
-          try {
-            const type = msg.from === username ? 'sent' : 'received';
-            
-            // Безопасное создание timestamp
-            let timestamp;
-            if (msg.created_at) {
-              timestamp = new Date(msg.created_at);
-              if (isNaN(timestamp.getTime())) {
-                console.warn('Невалидная дата сообщения:', msg.created_at);
-                timestamp = new Date();
-              }
-            } else {
-              timestamp = new Date();
-            }
-            
-            newMessages.push({
-              id: msg.id || `msg-${index}-${Date.now()}`,
-              from: msg.from,
-              to: msg.to,
-              message: msg.message,
-              timestamp: timestamp,
-              type
-            });
-          } catch (msgError) {
-            console.error('❌ Ошибка обработки сообщения:', msgError, msg);
-          }
-        });
+      if (response.ok && data.messages) {
+        const formattedMessages = data.messages.map(msg => ({
+          ...msg,
+          type: msg.from_user_id === userData.user_id ? 'sent' : 'received'
+        }));
+        setMessages(formattedMessages);
       } else {
-        console.log('📝 Сообщений не найдено');
-        newMessages.push({
-          id: 'empty',
-          message: 'Здесь пока нет сообщений. Напишите что-нибудь!',
-          timestamp: new Date(),
-          type: 'system'
-        });
+        setMessages([]);
       }
-      
-      setMessages(newMessages);
-      
     } catch (error) {
-      console.error('❌ Ошибка загрузки чата:', error);
-      setMessages([
-        {
-          id: 'error-header',
-          message: `💬 Чат с ${otherUser}`,
-          timestamp: new Date(),
-          type: 'system'
-        },
-        {
-          id: 'error',
-          message: `❌ Ошибка загрузки: ${error.message}`,
-          timestamp: new Date(),
-          type: 'system'
-        }
-      ]);
+      console.error('Ошибка загрузки истории:', error);
+      setMessages([]);
     } finally {
       setLoading(false);
     }
   };
 
   const sendMessage = () => {
-    if (!ws || !isConnected || !currentChat || !message.trim()) {
-      console.log('❌ Не можем отправить сообщение:', {
-        hasWs: !!ws,
-        isConnected,
-        currentChat,
-        messageLength: message.trim().length
-      });
+    if (!message.trim() || !currentChat || !ws || ws.readyState !== WebSocket.OPEN) {
       return;
     }
 
     const messageData = {
-      to: currentChat,
+      to_user_id: currentChat.id,
       message: message.trim()
     };
 
     try {
-      console.log('📤 Отправляем сообщение:', messageData);
       ws.send(JSON.stringify(messageData));
-      addMessage(username, currentChat, message.trim(), 'sent');
-      setMessage('');
-      messageInputRef.current?.focus();
       
-      setTimeout(() => loadChats(), 500);
+      // Добавляем отправленное сообщение в UI
+      const sentMessage = {
+        from_user_id: userData.user_id,
+        to_user_id: currentChat.id,
+        from_username: userData.username,
+        to_username: currentChat.username,
+        message: message.trim(),
+        created_at: new Date().toISOString(),
+        type: 'sent'
+      };
+
+      setMessages(prev => [...prev, sentMessage]);
+      setMessage('');
     } catch (error) {
-      console.error('❌ Ошибка отправки:', error);
+      console.error('Ошибка отправки сообщения:', error);
     }
   };
 
   const createNewChat = async () => {
-    if (!newChatUser.trim() || !newChatMessage.trim()) {
-      alert('Заполните все поля');
-      return;
-    }
-
-    if (newChatUser === username) {
-      alert('Нельзя создать чат с самим собой');
+    if (!newChatUser.trim()) {
       return;
     }
 
     try {
-      console.log('🆕 Создаем новый чат');
-      const response = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: username,
-          to: newChatUser.trim(),
-          message: newChatMessage.trim()
-        })
-      });
-
-      if (response.ok) {
-        console.log('✅ Чат создан успешно');
-        setShowNewChatForm(false);
-        setNewChatUser('');
-        setNewChatMessage('');
+      // Проверяем, является ли введенное значение числом (ID пользователя)
+      const userIdMatch = newChatUser.trim().match(/^\d+$/);
+      
+      if (userIdMatch) {
+        // Если это число, создаем фиктивного пользователя с этим ID
+        const userId = parseInt(newChatUser.trim(), 10);
+        const mockUser = {
+          id: userId,
+          username: `user_${userId}`, // Временное имя
+          last_seen: new Date().toISOString()
+        };
         
-        setTimeout(() => {
-          loadChats();
-          selectChat(newChatUser.trim());
-        }, 500);
+        // Выбираем этого пользователя как текущий чат
+        setCurrentChat(mockUser);
+        
+        // Если есть первое сообщение, отправляем его
+        if (newChatMessage.trim() && ws && ws.readyState === WebSocket.OPEN) {
+          const messageData = {
+            to_user_id: userId,
+            message: newChatMessage.trim()
+          };
+
+          ws.send(JSON.stringify(messageData));
+          
+          // Добавляем сообщение в UI
+          const sentMessage = {
+            from_user_id: userData.user_id,
+            to_user_id: userId,
+            from_username: userData.username,
+            to_username: mockUser.username,
+            message: newChatMessage.trim(),
+            created_at: new Date().toISOString(),
+            type: 'sent'
+          };
+
+          setMessages([sentMessage]);
+        } else {
+          setMessages([]);
+        }
+        
+        // Обновляем список чатов
+        setTimeout(() => loadChats(), 500);
       } else {
-        const errorText = await response.text();
-        console.error('❌ Ошибка создания чата:', response.status, errorText);
-        alert(`Ошибка создания чата: ${response.status}`);
+        alert('Пока поддерживается только поиск по ID пользователя. Введите числовой ID.');
+        return;
       }
     } catch (error) {
-      console.error('❌ Ошибка создания чата:', error);
-      alert('Ошибка сети при создании чата');
+      console.error('Ошибка создания чата:', error);
+      alert('Ошибка создания чата');
+    } finally {
+      // Закрываем модальное окно и очищаем поля
+      setShowNewChatForm(false);
+      setNewChatUser('');
+      setNewChatMessage('');
     }
   };
 
-  const addMessage = (from, to, text, type) => {
-    const newMessage = {
-      id: `${Date.now()}-${Math.random()}`,
-      from,
-      to,
-      message: text,
-      timestamp: new Date(),
-      type
-    };
-    console.log('➕ Добавляем сообщение:', newMessage);
-    setMessages(prev => [...prev, newMessage]);
+  const formatTime = (timestamp) => {
+    try {
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return '';
+      return new Intl.DateTimeFormat('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(date);
+    } catch (error) {
+      return '';
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -441,243 +448,147 @@ function App() {
     }
   };
 
-  // Тестируем подключение к API при загрузке
-  useEffect(() => {
-    const testAPI = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/health`);
-        if (response.ok) {
-          console.log('✅ API доступен');
-        } else {
-          console.log('⚠️ API недоступен:', response.status);
-        }
-      } catch (error) {
-        console.error('❌ Ошибка соединения с API:', error);
-      }
-    };
-    testAPI();
-  }, []);
+  // Если не авторизован, показываем форму входа
+  if (!isAuthenticated) {
+    return <AuthForm onLogin={handleLogin} />;
+  }
 
   return (
-    <div className="app">
-      <div className="container">
-        {/* Header */}
-        <header className="header">
-          <div className="header-content">
-            <div className="logo">
-              <MessageIcon />
-              <h1>TechAssistChat</h1>
-            </div>
-            <div className="header-info">
-              {username && <span className="username">👋 {username}</span>}
-              <div className="connection-status">
-                {isConnected ? (
-                  <div className="status connected">
-                    <WifiIcon />
-                    <span>Онлайн</span>
-                  </div>
-                ) : (
-                  <div className="status disconnected">
-                    <WifiOffIcon />
-                    <span>Оффлайн</span>
-                  </div>
-                )}
-              </div>
-            </div>
+    <div className="chat-app">
+      {/* Header */}
+      <div className="header">
+        <div className="header-left">
+          <MessageIcon />
+          <h1>TechAssist Chat</h1>
+        </div>
+        <div className="header-right">
+          <span className="username">👋 {userData?.username}</span>
+          <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+            {isConnected ? <WifiIcon /> : <WifiOffIcon />}
+            {isConnected ? 'Онлайн' : 'Офлайн'}
           </div>
-        </header>
-
-        {/* Main Content */}
-        <div className="main-content">
-          {/* Sidebar */}
-          <aside className="sidebar">
-            {!isConnected ? (
-              <div className="login-form">
-                <h3>Войти в чат</h3>
-                <div className="input-group">
-                  <input
-                    type="text"
-                    placeholder="Ваше имя"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && connect()}
-                    className="input"
-                  />
-                  <button onClick={connect} className="btn btn-primary">
-                    Подключиться
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="sidebar-header">
-                  <h3>Чаты ({chats.length})</h3>
-                  <button 
-                    onClick={() => setShowNewChatForm(true)}
-                    className="new-chat-btn"
-                    title="Создать новый чат"
-                  >
-                    +
-                  </button>
-                </div>
-
-                {/* New Chat Form */}
-                {showNewChatForm && (
-                  <div className="new-chat-form">
-                    <h4>Новый чат</h4>
-                    <input
-                      type="text"
-                      placeholder="Имя пользователя"
-                      value={newChatUser}
-                      onChange={(e) => setNewChatUser(e.target.value)}
-                      className="input"
-                    />
-                    <textarea
-                      placeholder="Первое сообщение"
-                      value={newChatMessage}
-                      onChange={(e) => setNewChatMessage(e.target.value)}
-                      className="input"
-                      rows={2}
-                    />
-                    <div className="form-buttons">
-                      <button onClick={createNewChat} className="btn btn-primary">
-                        Создать
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setShowNewChatForm(false);
-                          setNewChatUser('');
-                          setNewChatMessage('');
-                        }}
-                        className="btn btn-secondary"
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Chats List */}
-                <div className="chats-list">
-                  {chats.length === 0 ? (
-                    <div className="empty-chats">
-                      <p>Нет чатов</p>
-                      <small>Создайте новый чат чтобы начать общение</small>
-                    </div>
-                  ) : (
-                    chats.map((chat, index) => (
-                      <div
-                        key={`chat-${index}-${chat.user}`}
-                        className={`chat-item ${currentChat === chat.user ? 'active' : ''}`}
-                        onClick={() => selectChat(chat.user)}
-                      >
-                        <div className="chat-avatar">
-                          <UserIcon />
-                          {onlineUsers.includes(chat.user) && (
-                            <div className="online-indicator"></div>
-                          )}
-                        </div>
-                        <div className="chat-info">
-                          <div className="chat-name">{chat.user}</div>
-                          <div className="chat-last-message">
-                            {chat.last_message && chat.last_message.length > 30 
-                              ? chat.last_message.substring(0, 30) + '...'
-                              : chat.last_message || 'Нет сообщений'}
-                          </div>
-                        </div>
-                        <div className="chat-time">
-                          {formatDate(chat.last_message_time)}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="sidebar-footer">
-                  <button onClick={disconnect} className="btn btn-secondary">
-                    Выйти
-                  </button>
-                </div>
-              </>
-            )}
-          </aside>
-
-          {/* Chat Area */}
-          <main className="chat-area">
-            {!currentChat ? (
-              <div className="empty-state">
-                <MessageIcon />
-                <h3>Выберите чат</h3>
-                <p>Выберите чат из списка или создайте новый</p>
-              </div>
-            ) : (
-              <>
-                <div className="chat-header">
-                  <div className="chat-header-info">
-                    <h3>{currentChat}</h3>
-                    {onlineUsers.includes(currentChat) && (
-                      <span className="online-badge">🟢 онлайн</span>
-                    )}
-                    {loading && <span className="loading-badge">⏳ загрузка...</span>}
-                  </div>
-                </div>
-
-                <div className="messages-container">
-                  <div className="messages">
-                    {messages.length === 0 ? (
-                      <div className="empty-messages">
-                        <p>Загружаем сообщения...</p>
-                      </div>
-                    ) : (
-                      messages.map((msg) => (
-                        <div key={msg.id} className={`message ${msg.type}`}>
-                          {msg.type === 'system' ? (
-                            <div className="system-message">
-                              <span>{msg.message}</span>
-                              <span className="timestamp">{formatTime(msg.timestamp)}</span>
-                            </div>
-                          ) : (
-                            <div className="chat-message">
-                              <div className="message-content">{msg.message}</div>
-                              <div className="message-time">{formatTime(msg.timestamp)}</div>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
-                </div>
-
-                {/* Message Input */}
-                <div className="message-input-container">
-                  <div className="message-input">
-                    <textarea
-                      ref={messageInputRef}
-                      placeholder={`Сообщение для ${currentChat}...`}
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      disabled={!isConnected || loading}
-                      rows={1}
-                      className="input message-textarea"
-                    />
-                    <button
-                      onClick={sendMessage}
-                      disabled={!isConnected || !message.trim() || loading}
-                      className="btn btn-primary send-btn"
-                    >
-                      <SendIcon />
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </main>
+          <button onClick={handleLogout} className="logout-btn">
+            Выйти
+          </button>
         </div>
       </div>
+
+      <div className="chat-container">
+        {/* Sidebar */}
+        <div className="sidebar">
+          <div className="sidebar-header">
+            <h3>Чаты</h3>
+            <button onClick={() => setShowNewChatForm(true)} className="new-chat-btn">
+              <PlusIcon />
+            </button>
+          </div>
+
+          <div className="chats-list">
+            {chats.map((chat) => (
+              <div
+                key={chat.id}
+                className={`chat-item ${currentChat?.id === chat.id ? 'active' : ''}`}
+                onClick={() => selectChat(chat)}
+              >
+                <div className="chat-avatar">
+                  <UserIcon />
+                </div>
+                <div className="chat-info">
+                  <div className="chat-name">{chat.username}</div>
+                  <div className="chat-last-seen">
+                    {formatTime(chat.last_seen)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Main Chat Area */}
+        <div className="main-chat">
+          {currentChat ? (
+            <>
+              <div className="chat-header">
+                <div className="chat-user-info">
+                  <UserIcon />
+                  <span>{currentChat.username}</span>
+                </div>
+              </div>
+
+              <div className="messages-container">
+                {loading && <div className="loading">Загрузка сообщений...</div>}
+                
+                {messages.map((msg, index) => (
+                  <div key={index} className={`message ${msg.type}`}>
+                    <div className="message-content">
+                      <div className="message-text">{msg.message}</div>
+                      <div className="message-time">
+                        {formatTime(msg.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div className="message-input-container">
+                <textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={`Сообщение для ${currentChat.username}...`}
+                  rows="1"
+                  disabled={!isConnected}
+                />
+                <button 
+                  onClick={sendMessage} 
+                  disabled={!message.trim() || !isConnected}
+                  className="send-button"
+                >
+                  <SendIcon />
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="no-chat-selected">
+              <MessageIcon />
+              <h3>Выберите чат для начала общения</h3>
+              <p>Выберите существующий чат из списка или создайте новый</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* New Chat Modal */}
+      {showNewChatForm && (
+        <div className="modal-overlay" onClick={() => setShowNewChatForm(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Новый чат</h3>
+            <input
+              type="text"
+              placeholder="ID пользователя (например: 2)"
+              value={newChatUser}
+              onChange={(e) => setNewChatUser(e.target.value)}
+            />
+            <textarea
+              placeholder="Первое сообщение (необязательно)"
+              value={newChatMessage}
+              onChange={(e) => setNewChatMessage(e.target.value)}
+              rows="3"
+            />
+            <div className="modal-buttons">
+              <button onClick={() => setShowNewChatForm(false)}>
+                Отмена
+              </button>
+              <button onClick={createNewChat} disabled={!newChatUser.trim()}>
+                Создать чат
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default App; 
+export default App;

@@ -17,9 +17,13 @@ func SetupRoutes(hub *ws.Hub) *gin.Engine {
 	chatHandler := handlers.NewChatHandler(hub)
 	userHandler := handlers.NewUserHandler(hub)
 	debugHandler := handlers.NewDebugHandler()
+	authHandler := handlers.NewAuthHandler()
 
 	r.GET("/health", healthHandler.GetHealth)
 	r.HEAD("/health", healthHandler.HeadHealth)
+
+	r.POST("/register", authHandler.Register)
+	r.POST("/login", authHandler.Login)
 
 	r.GET("/ws", func(c *gin.Context) {
 		handlers.HandleWebSocket(c, hub)
