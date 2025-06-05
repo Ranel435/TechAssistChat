@@ -29,18 +29,27 @@ func SetupRoutes(hub *ws.Hub) *gin.Engine {
 		handlers.HandleWebSocket(c, hub)
 	})
 
+	r.GET("/ws-legacy", func(c *gin.Context) {
+		handlers.HandleWebSocketLegacy(c, hub)
+	})
+
 	api := r.Group("/api")
 	{
-		// Chat
 		api.GET("/chats/:username", chatHandler.GetUserChats)
 		api.GET("/chat/:user1/:user2", chatHandler.GetChatHistory)
 		api.POST("/chat", chatHandler.CreateChat)
 
-		// User
 		api.GET("/users/online", userHandler.GetOnlineUsers)
 
-		// Debug
 		api.GET("/messages", debugHandler.GetAllMessages)
+	}
+
+	authAPI := r.Group("/api/auth")
+	authAPI.Use(middleware.JWTAuth())
+	{
+		authAPI.GET("/history", chatHandler.GetHistory)
+
+		authAPI.GET("/chats", chatHandler.GetUserChatsAuth)
 	}
 
 	return r

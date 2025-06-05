@@ -2,37 +2,28 @@
 .git
 .gitignore
 
-# IDE
+# Documentation
+*.md
+LICENSE
+
+# Test files
+*_test.go
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE files
 .vscode
 .idea
-*.swp
-*.swo
 
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Go build artifacts
+# Build artifacts
 main
 *.exe
-*.test
-*.prof
 
-# Environment files
-.env
-.env.local
-
-# Documentation
-README.md
-*.md
-
-# Docker
-Dockerfile
-.dockerignore
-
-# Temporary files
-tmp/
-temp/
-
-# Logs
-*.log 
+# Vendor (если не используется)
+# vendor/ 

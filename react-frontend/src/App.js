@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8080';
-const WS_URL = process.env.NODE_ENV === 'production' ? 
-  `ws://${window.location.host}/ws` : 'ws://localhost:8080/ws';
+// Используем относительные пути - nginx будет проксировать запросы
+const API_BASE = '';  // Пустая строка означает относительные пути
+const WS_URL = `ws://${window.location.host}/ws`;  // WebSocket через тот же хост
 
 // Утилиты для работы с токенами
 const TokenManager = {
