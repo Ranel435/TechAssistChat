@@ -1,0 +1,40 @@
+# Многоэтапная сборка с vendor
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /app
+
+# Устанавливаем git и ca-certificates
+RUN apk add --no-cache git ca-certificates
+
+# Копируем все файлы проекта
+COPY . .
+
+# Используем vendor режим для offline сборки
+RUN go mod vendor || true
+
+# Собираем приложение с vendor
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -a -installsuffix cgo -ldflags="-w -s" -o main ./cmd/server || \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o main ./cmd/server
+
+# Финальный образ
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata wget
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /root/
+
+COPY --from=builder /app/main .
+
+RUN chown -R appuser:appgroup /root/
+
+USER appuser
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+CMD ["./main"] 

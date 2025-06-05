@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Chat Test</title>
+    <title>WebSocket Chat Test with JWT</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .container { max-width: 600px; }
@@ -19,23 +19,47 @@
 </head>
 <body>
     <div class="container">
-        <h1>WebSocket Chat Test</h1>
+        <h1>WebSocket Chat Test with JWT</h1>
         
-        <div class="section">
-            <h3>Подключение</h3>
+        <!-- Блок авторизации -->
+        <div class="section" id="authSection">
+            <h3>Авторизация</h3>
+            <div class="auth-tabs">
+                <button id="loginTab" class="tab-button active" onclick="switchTab('login')">Вход</button>
+                <button id="registerTab" class="tab-button" onclick="switchTab('register')">Регистрация</button>
+            </div>
+            
+            <div id="loginForm">
+                <input type="text" id="loginUsername" placeholder="Имя пользователя" />
+                <input type="password" id="loginPassword" placeholder="Пароль" />
+                <button onclick="login()">Войти</button>
+            </div>
+            
+            <div id="registerForm" style="display: none;">
+                <input type="text" id="regUsername" placeholder="Имя пользователя (мин. 3 символа)" />
+                <input type="password" id="regPassword" placeholder="Пароль (мин. 6 символов)" />
+                <button onclick="register()">Зарегистрироваться</button>
+            </div>
+            
+            <div id="authStatus">Не авторизован</div>
+        </div>
+        
+        <!-- Блок подключения -->
+        <div class="section" id="connectionSection" style="display: none;">
+            <h3>WebSocket Подключение</h3>
             <div class="controls">
-                <input type="text" id="username" placeholder="Ваше имя" />
                 <button onclick="connect()">🔗 Подключиться</button>
                 <button onclick="disconnect()">❌ Отключиться</button>
                 <button onclick="loadHistory()">📜 История</button>
                 <button onclick="clearMessages()">🗑️ Очистить</button>
+                <button onclick="logout()">🚪 Выйти</button>
             </div>
             <span id="status">Не подключен</span>
         </div>
         
         <div class="section">
             <h3>Отправка сообщения</h3>
-            <label>Кому: <input type="text" id="toUser" value="user2" placeholder="Имя получателя"></label><br>
+            <label>Кому: <input type="text" id="toUser" value="user2" placeholder="ID получателя"></label><br>
             <label>Сообщение: <input type="text" id="messageInput" placeholder="Введите сообщение" style="width: 300px;"></label>
             <button onclick="sendMessage()">Отправить</button>
         </div>
@@ -48,11 +72,134 @@
 
     <script>
         let ws = null;
+        let authToken = null;
+        let currentUser = null;
+        
+        // Управление табами
+        function switchTab(tab) {
+            if (tab === 'login') {
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('registerForm').style.display = 'none';
+                document.getElementById('loginTab').classList.add('active');
+                document.getElementById('registerTab').classList.remove('active');
+            } else {
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('registerForm').style.display = 'block';
+                document.getElementById('loginTab').classList.remove('active');
+                document.getElementById('registerTab').classList.add('active');
+            }
+        }
+        
+        // Авторизация
+        async function login() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            if (!username || !password) {
+                alert('Заполните все поля');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:8080/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.token;
+                    currentUser = data;
+                    
+                    document.getElementById('authSection').style.display = 'none';
+                    document.getElementById('connectionSection').style.display = 'block';
+                    document.getElementById('authStatus').textContent = `Авторизован как: ${data.username}`;
+                    
+                    addMessage(`✅ Успешный вход как ${data.username}`, 'status');
+                } else {
+                    alert('Ошибка входа: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка соединения: ' + error.message);
+            }
+        }
+        
+        async function register() {
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
+            
+            if (!username || !password) {
+                alert('Заполните все поля');
+                return;
+            }
+            
+            if (username.length < 3) {
+                alert('Имя пользователя должно содержать минимум 3 символа');
+                return;
+            }
+            
+            if (password.length < 6) {
+                alert('Пароль должен содержать минимум 6 символов');
+                return;
+            }
+            
+            try {
+                const response = await fetch('http://localhost:8080/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.token;
+                    currentUser = data;
+                    
+                    document.getElementById('authSection').style.display = 'none';
+                    document.getElementById('connectionSection').style.display = 'block';
+                    document.getElementById('authStatus').textContent = `Зарегистрирован как: ${data.username}`;
+                    
+                    addMessage(`✅ Успешная регистрация как ${data.username}`, 'status');
+                } else {
+                    alert('Ошибка регистрации: ' + data.error);
+                }
+            } catch (error) {
+                alert('Ошибка соединения: ' + error.message);
+            }
+        }
+        
+        function logout() {
+            if (ws) {
+                ws.close();
+            }
+            
+            authToken = null;
+            currentUser = null;
+            
+            document.getElementById('authSection').style.display = 'block';
+            document.getElementById('connectionSection').style.display = 'none';
+            document.getElementById('authStatus').textContent = 'Не авторизован';
+            
+            // Очищаем поля
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('regUsername').value = '';
+            document.getElementById('regPassword').value = '';
+            
+            clearMessages();
+            addMessage('🚪 Вышли из системы', 'status');
+        }
         
         function connect() {
-            const username = document.getElementById('username').value;
-            if (!username) {
-                alert('Введите имя пользователя');
+            if (!authToken) {
+                alert('Сначала авторизуйтесь');
                 return;
             }
             
@@ -60,15 +207,14 @@
                 ws.close();
             }
             
-            // Проверяем разные варианты подключения
-            const wsUrl = `ws://localhost:3000/ws?user=${username}`;
+            const wsUrl = `ws://localhost:8080/ws?token=${encodeURIComponent(authToken)}`;
             console.log('Подключаемся к:', wsUrl);
             
             ws = new WebSocket(wsUrl);
             
             ws.onopen = function(event) {
-                addMessage(`🟢 Подключен как ${username}`, 'status');
-                document.getElementById('status').textContent = `Подключен как ${username}`;
+                addMessage(`🟢 Подключен как ${currentUser.username}`, 'status');
+                document.getElementById('status').textContent = `Подключен как ${currentUser.username}`;
                 document.getElementById('status').style.color = 'green';
                 console.log('WebSocket подключен');
             };
@@ -76,7 +222,7 @@
             ws.onmessage = function(event) {
                 console.log('Получено сообщение:', event.data);
                 const msg = JSON.parse(event.data);
-                addMessage(`📨 От ${msg.from}: ${msg.message}`, 'received');
+                addMessage(`📨 От ${msg.from_username}: ${msg.message}`, 'received');
             };
             
             ws.onclose = function(event) {
@@ -93,40 +239,78 @@
             };
         }
         
-        function disconnect() {
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-        }
-        
         function sendMessage() {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 addMessage('❌ Не подключен к серверу!', 'status');
                 return;
             }
             
-            const to = document.getElementById('toUser').value;
+            const toUserID = document.getElementById('toUser').value;
             const message = document.getElementById('messageInput').value;
             
-            if (!to || !message) {
-                alert('Заполните получателя и сообщение');
+            if (!toUserID || !message) {
+                alert('Заполните ID получателя и сообщение');
                 return;
             }
             
             const msg = {
-                to: to,
+                to_user_id: parseInt(toUserID),
                 message: message
             };
             
             try {
                 ws.send(JSON.stringify(msg));
-                addMessage(`📤 Для ${to}: ${message}`, 'sent');
+                addMessage(`📤 Для пользователя ${toUserID}: ${message}`, 'sent');
                 document.getElementById('messageInput').value = '';
                 console.log('Сообщение отправлено:', msg);
             } catch (error) {
                 addMessage('❌ Ошибка отправки: ' + error, 'status');
                 console.error('Ошибка отправки:', error);
+            }
+        }
+        
+        async function loadHistory() {
+            if (!authToken) {
+                alert('Авторизуйтесь для загрузки истории');
+                return;
+            }
+            
+            const userBID = document.getElementById('toUser').value;
+            if (!userBID) {
+                alert('Укажите ID собеседника');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:8080/api/auth/history?userB_id=${userBID}`, {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.messages) {
+                    clearMessages();
+                    addMessage(`📜 Загружена история чата с пользователем ${userBID}`, 'status');
+                    data.messages.forEach(msg => {
+                        const direction = msg.from_user_id === currentUser.user_id ? 'sent' : 'received';
+                        const time = new Date(msg.created_at).toLocaleTimeString();
+                        addMessage(`[${time}] ${msg.from_username} → ${msg.to_username}: ${msg.message}`, direction);
+                    });
+                } else {
+                    addMessage('❌ Ошибка загрузки истории: ' + (data.error || 'Неизвестная ошибка'), 'status');
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки истории:', error);
+                addMessage('❌ Ошибка загрузки истории: ' + error.message, 'status');
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
             }
         }
         
@@ -143,64 +327,12 @@
             document.getElementById('messages').innerHTML = '';
         }
         
-        function loadHistory() {
-            const user1 = document.getElementById('username').value;
-            const user2 = document.getElementById('toUser').value;
-            
-            if (!user1 || !user2) {
-                alert('Укажите свое имя и имя собеседника');
-                return;
-            }
-            
-            fetch(`http://localhost:8080/api/chat/${user1}/${user2}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.messages) {
-                        clearMessages();
-                        addMessage(`📜 Загружена история чата между ${user1} и ${user2}`, 'status');
-                        data.messages.forEach(msg => {
-                            const direction = msg.from === user1 ? 'sent' : 'received';
-                            const time = new Date(msg.created_at).toLocaleTimeString();
-                            addMessage(`[${time}] ${msg.from} → ${msg.to}: ${msg.message}`, direction);
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Ошибка загрузки истории:', error);
-                    addMessage('❌ Ошибка загрузки истории: ' + error.message, 'status');
-                });
-        }
-        
-        function loadAllMessages() {
-            fetch(`http://localhost:8080/api/messages`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.messages) {
-                        clearMessages();
-                        addMessage('📜 Последние сообщения в системе:', 'status');
-                        data.messages.forEach(msg => {
-                            const time = new Date(msg.created_at).toLocaleTimeString();
-                            addMessage(`[${time}] ${msg.from_user} → ${msg.to_user}: ${msg.message}`, 'received');
-                        });
-                    }
-                })
-                .catch(error => {
-                    console.error('Ошибка загрузки сообщений:', error);
-                    addMessage('❌ Ошибка загрузки сообщений: ' + error.message, 'status');
-                });
-        }
-        
-        // Отправка сообщения по Enter
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-        
-        // Подключение по Enter в поле имени
-        document.getElementById('username').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                connect();
+        // Изменяем placeholder для поля получателя
+        document.addEventListener('DOMContentLoaded', function() {
+            const toUserField = document.getElementById('toUser');
+            if (toUserField) {
+                toUserField.placeholder = 'ID получателя';
+                toUserField.value = '2'; // По умолчанию
             }
         });
     </script>
