@@ -17,10 +17,10 @@ type Message struct {
 
 func (m *Message) ToDBMessage() *models.Message {
 	return &models.Message{
-		FromUserID: m.FromUserID,
-		ToUserID:   m.ToUserID,
 		FromUser:   m.FromUsername, // Для обратной совместимости
 		ToUser:     m.ToUsername,   // Для обратной совместимости
+		FromUserID: m.FromUserID,
+		ToUserID:   m.ToUserID,
 		Message:    m.Message,
 		CreatedAt:  time.Now(),
 	}

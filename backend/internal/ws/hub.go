@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"backend/internal/database"
 	"backend/internal/repository"
 	"log"
 	"sync"
@@ -12,7 +13,7 @@ type Hub struct {
 	unregister  chan *Client
 	broadcast   chan Message
 	mu          sync.Mutex
-	messageRepo repository.MessageRepository
+	messageRepo database.MessageRepository
 }
 
 var hubInstance *Hub
@@ -40,7 +41,6 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 
-			// Отключаем предыдущие соединения этого пользователя
 			for existingClient := range h.clients {
 				if existingClient.UserID == client.UserID {
 					delete(h.clients, existingClient)

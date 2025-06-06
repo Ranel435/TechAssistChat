@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"backend/internal/auth"
+	"backend/internal/database"
 	"backend/internal/models"
 	"backend/internal/repository"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo repository.UserRepository
+	userRepo database.UserRepository
 }
 
 func NewAuthHandler() *AuthHandler {
@@ -27,21 +28,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Проверяем, существует ли пользователь
 	existingUser, _ := h.userRepo.GetUserByUsername(req.Username)
 	if existingUser != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Пользователь с таким именем уже существует"})
 		return
 	}
 
-	// Хешируем пароль
 	hashedPassword, err := auth.HashPassword(req.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка обработки пароля"})
 		return
 	}
 
-	// Создаем пользователя
 	user := &models.User{
 		Username:     req.Username,
 		PasswordHash: hashedPassword,

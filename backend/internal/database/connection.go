@@ -18,17 +18,17 @@ func InitDB(cfg *config.DatabaseConfig) error {
 
 	DB, err = sql.Open("postgres", cfg.GetDSN())
 	if err != nil {
-		return fmt.Errorf("Ошибка открытия БД: %w", err)
+		return fmt.Errorf("ошибка открытия БД: %w", err)
 	}
 
 	if err = DB.Ping(); err != nil {
-		return fmt.Errorf("Ошибка подключения к БД: %w", err)
+		return fmt.Errorf("ошибка подключения к БД: %w", err)
 	}
 
 	log.Println("Успешное подключение к PostgreSQL")
 
 	if err = runMigrations(cfg); err != nil {
-		return fmt.Errorf("Ошибка миграций: %w", err)
+		return fmt.Errorf("ошибка миграций: %w", err)
 	}
 
 	return nil

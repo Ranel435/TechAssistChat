@@ -13,8 +13,8 @@ import (
 
 type ChatHandler struct {
 	hub         *ws.Hub
-	messageRepo repository.MessageRepository
-	userRepo    repository.UserRepository
+	messageRepo database.MessageRepository
+	userRepo    database.UserRepository
 }
 
 func NewChatHandler(hub *ws.Hub) *ChatHandler {
